@@ -21,6 +21,7 @@ cdef extern from *:
 cdef extern from '../_stb/stb_image.h':
     int stbi_info(const char* filename, int *x, int *y, int *comp)
     unsigned char* stbi_load(const char* filename, int *x, int *y, int *channels_in_file, int desired_channels)
+    void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
     const char* stbi_failure_reason()
 
 cdef extern from "../_stb/stb_rect_pack.h":
@@ -76,6 +77,7 @@ cdef class AtlasPacker:
             stbrp_init_target(self.context, self.width, self.height, self.nodes, self.num_nodes)
             stbrp_setup_heuristic(self.context, self.heuristic)
             self.atlas = <unsigned char*> PyMem_Calloc(self.width * self.height * 4, sizeof(char))
+            stbi_set_flip_vertically_on_load(1) # set bottom-left as start
 
 
         # step 1: read image attributes
@@ -90,8 +92,8 @@ cdef class AtlasPacker:
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
                 potential_keys.append(op.splitext(op.basename(im))[0])
                 rects[counter].id = counter
-                rects[counter].w = x + self.pad
-                rects[counter].h = y + self.pad
+                rects[counter].w = x + 2 * self.pad
+                rects[counter].h = y + 2 * self.pad
                 counter += 1
 
             # step 2: pack the rects
