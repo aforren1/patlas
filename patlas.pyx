@@ -6,10 +6,15 @@
 #cython: initializedcheck=False
 #cython: cdivision=True
 cimport cython
-from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Calloc, PyMem_Realloc
+from cython.view cimport array
+from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Realloc
 from cython.parallel import prange
 from libc.string cimport memcpy
 import os.path as op
+
+cdef extern from "Python.h":
+    # wasn't fixed until a week ago, so not in any release yet...
+    void* PyMem_Calloc(size_t nelem, size_t elsize)
 
 cdef extern from *:
     """
@@ -20,13 +25,13 @@ cdef extern from *:
     #define STBI_REALLOC PyMem_Realloc
     """
 
-cdef extern from '../_stb/stb_image.h':
+cdef extern from 'stb/stb_image.h':
     int stbi_info(const char* filename, int *x, int *y, int *comp)
     unsigned char* stbi_load(const char* filename, int *x, int *y, int *channels_in_file, int desired_channels)
     void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
     const char* stbi_failure_reason()
 
-cdef extern from "../_stb/stb_rect_pack.h":
+cdef extern from "stb/stb_rect_pack.h":
     struct stbrp_context:
         pass
 
@@ -56,10 +61,10 @@ cdef class AtlasPacker:
     cdef int pad
     cdef int num_nodes
     cdef int heuristic
+    cdef dict locs
     # 
-    cdef int num_keys
     cdef stbrp_node* nodes
-    cdef unsigned char* atlas
+    cdef unsigned char* _atlas
 
     def __init__(self, width, height, pad=2, heuristic=Heuristic.DEFAULT):
         self.width = width
@@ -67,10 +72,8 @@ cdef class AtlasPacker:
         self.pad = pad
         self.num_nodes = width
         self.heuristic = heuristic
-        self.keys = []
-        self.num_keys = 0
 
-    def pack(self, images):
+    cpdef pack(self, images):
         # take list of image paths
         # return nothing for now (or just warning/err)-- on request, give memoryview & dict
         # TODO: release GIL
@@ -79,7 +82,7 @@ cdef class AtlasPacker:
             # we only call init once, so that we can re-use with another call to pack
             stbrp_init_target(self.context, self.width, self.height, self.nodes, self.num_nodes)
             stbrp_setup_heuristic(self.context, self.heuristic)
-            self.atlas = <unsigned char*> PyMem_Calloc(self.width * self.height * 4, sizeof(char))
+            self._atlas = <unsigned char*> PyMem_Calloc(self.width * self.height * 4, sizeof(char))
             stbi_set_flip_vertically_on_load(1) # set bottom-left as start
 
 
@@ -89,6 +92,9 @@ cdef class AtlasPacker:
         cdef int x, y, channels_in_file, size
 
         # step 1: read image attributes
+        cdef unsigned char* data
+        cdef unsigned char* source_row
+        cdef unsigned char* target_row
         try:
             rects = <stbrp_rect*> PyMem_Malloc(len(images) * sizeof(stbrp_rect))
             for im in images:
@@ -108,25 +114,31 @@ cdef class AtlasPacker:
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
             # TODO: prange outer or inner loop (or both??)?
-            for i in prange(len(images)):
-                cdef unsigned char* data = stbi_load(images[i], &x, &y, &channels_in_file, 4) # force RGBA
+
+            for i in range(len(images)):
+                data = stbi_load(images[i], &x, &y, &channels_in_file, 4) # force RGBA
                 if data is NULL:
                     raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
                 
                 # conceptually from https://stackoverflow.com/a/12273365/2690232
                 for yy in range(y):
-                    cdef const unsigned char* const source_row = &data[yy * x * 4]
+                    source_row = &data[yy * x * 4]
                     # get the subset of the atlas we're writing this row to-- need to account for padding
                     # and global offset within atlas
-                    cdef unsigned char* const target_row = &atlas[(yy + self.pad + rects[i].y) * x * 4 + rects[i].x + self.pad]
+                    target_row = &self._atlas[(yy + self.pad + rects[i].y) * x * 4 + rects[i].x + self.pad]
                     memcpy(target_row, source_row, x * 4 * sizeof(char))
-                
 
         # all done (and/or failed), free rects
         finally:
             PyMem_Free(rects)
 
+    @property
+    cpdef atlas(self):
+        cdef array _atlas = array((self.width, self.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
+        _atlas.data = <char*> self._atlas
+        # we manage the memory internally, so no need to set free callback?
+        return _atlas
 
     def __dealloc__(self):
         PyMem_Free(self.nodes)
-        PyMem_Free(self.atlas)
+        PyMem_Free(self._atlas)
