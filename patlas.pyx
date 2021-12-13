@@ -7,6 +7,8 @@
 #cython: cdivision=True
 cimport cython
 from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Calloc, PyMem_Realloc
+from cython.parallel import prange
+from libc.string cimport memcpy
 import os.path as op
 
 cdef extern from *:
@@ -71,6 +73,7 @@ cdef class AtlasPacker:
     def pack(self, images):
         # take list of image paths
         # return nothing for now (or just warning/err)-- on request, give memoryview & dict
+        # TODO: release GIL
         if self.context == NULL:
             self.nodes = <stbrp_node*> PyMem_Malloc(self.num_nodes * sizeof(stbrp_node))
             # we only call init once, so that we can re-use with another call to pack
@@ -80,11 +83,12 @@ cdef class AtlasPacker:
             stbi_set_flip_vertically_on_load(1) # set bottom-left as start
 
 
-        # step 1: read image attributes
         potential_keys = []
         cdef int counter = 0
         cdef stbrp_rect* rects
         cdef int x, y, channels_in_file, size
+
+        # step 1: read image attributes
         try:
             rects = <stbrp_rect*> PyMem_Malloc(len(images) * sizeof(stbrp_rect))
             for im in images:
@@ -103,11 +107,19 @@ cdef class AtlasPacker:
             # step 3: read in images and stick in memoryview, accounting for padding 
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
-            
-            for im in images:
-                cdef unsigned char* data = stbi_load(filename, &x, &y, &channels_in_file, 4) # force RGBA
+            # TODO: prange outer or inner loop (or both??)?
+            for i in prange(len(images)):
+                cdef unsigned char* data = stbi_load(images[i], &x, &y, &channels_in_file, 4) # force RGBA
                 if data is NULL:
                     raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
+                
+                # conceptually from https://stackoverflow.com/a/12273365/2690232
+                for yy in range(y):
+                    cdef const unsigned char* const source_row = &data[yy * x * 4]
+                    # get the subset of the atlas we're writing this row to-- need to account for padding
+                    # and global offset within atlas
+                    cdef unsigned char* const target_row = &atlas[(yy + self.pad + rects[i].y) * x * 4 + rects[i].x + self.pad]
+                    memcpy(target_row, source_row, x * 4 * sizeof(char))
                 
 
         # all done (and/or failed), free rects
