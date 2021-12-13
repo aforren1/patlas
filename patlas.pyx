@@ -7,22 +7,22 @@
 #cython: cdivision=True
 cimport cython
 from cython.view cimport array
-from cpython.mem cimport PyMem_Malloc, PyMem_Free, PyMem_Realloc
-from cython.parallel import prange
+from cpython.mem cimport PyMem_RawMalloc, PyMem_RawFree, PyMem_RawRealloc
+#from cython.parallel import prange
 from libc.string cimport memcpy
 import os.path as op
 
 cdef extern from "Python.h":
     # wasn't fixed until a week ago, so not in any release yet...
-    void* PyMem_Calloc(size_t nelem, size_t elsize)
+    void* PyMem_RawCalloc(size_t nelem, size_t elsize)
 
 cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
-    #define STBI_MALLOC PyMem_Malloc
-    #define STBI_FREE PyMem_Free
-    #define STBI_REALLOC PyMem_Realloc
+    #define STBI_MALLOC PyMem_RawMalloc
+    #define STBI_FREE PyMem_RawFree
+    #define STBI_REALLOC PyMem_RawRealloc
     """
 
 cdef extern from 'stb/stb_image.h':
@@ -54,91 +54,107 @@ cpdef enum Heuristic:
     BF_SORTHEIGHT
 
 @cython.no_gc_clear
+@cython.final # allow nogil for pack
 cdef class AtlasPacker:
-    cdef stbrp_context* context
+    cdef stbrp_context context
     cdef int width
     cdef int height
     cdef int pad
     cdef int num_nodes
     cdef int heuristic
-    cdef dict locs
+    cdef readonly dict locs
     # 
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
 
-    def __init__(self, width, height, pad=2, heuristic=Heuristic.DEFAULT):
+    def __init__(self, width: int, height: int, pad: int=2, heuristic: Heuristic=Heuristic.DEFAULT):
         self.width = width
         self.height = height
         self.pad = pad
         self.num_nodes = width
         self.heuristic = heuristic
+        self.locs = {}
 
-    cpdef pack(self, images):
+        self.nodes = <stbrp_node*> PyMem_RawMalloc(2 * self.num_nodes * sizeof(stbrp_node))
+        # we only call init once, so that we can re-use with another call to pack
+        if self.nodes == NULL:
+            raise RuntimeError('Unable to allocate stbrp_node memory.')
+        stbrp_init_target(&self.context, self.width, self.height, self.nodes, self.num_nodes)
+        stbrp_setup_heuristic(&self.context, self.heuristic)
+        self._atlas = <unsigned char*> PyMem_RawCalloc(self.width * self.height * 4, sizeof(char))
+        stbi_set_flip_vertically_on_load(1) # set bottom-left as start
+
+
+    cpdef pack(self, images: list[str]):
         # take list of image paths
         # return nothing for now (or just warning/err)-- on request, give memoryview & dict
         # TODO: release GIL
-        if self.context == NULL:
-            self.nodes = <stbrp_node*> PyMem_Malloc(self.num_nodes * sizeof(stbrp_node))
-            # we only call init once, so that we can re-use with another call to pack
-            stbrp_init_target(self.context, self.width, self.height, self.nodes, self.num_nodes)
-            stbrp_setup_heuristic(self.context, self.heuristic)
-            self._atlas = <unsigned char*> PyMem_Calloc(self.width * self.height * 4, sizeof(char))
-            stbi_set_flip_vertically_on_load(1) # set bottom-left as start
-
-
-        potential_keys = []
-        cdef int counter = 0
         cdef stbrp_rect* rects
-        cdef int x, y, channels_in_file, size
+        cdef int x, y, yy, channels_in_file, size, _id, n_images
+        n_images = len(images)
 
         # step 1: read image attributes
         cdef unsigned char* data
         cdef unsigned char* source_row
         cdef unsigned char* target_row
         try:
-            rects = <stbrp_rect*> PyMem_Malloc(len(images) * sizeof(stbrp_rect))
-            for im in images:
-                if not stbi_info(im, &x, &y, &channels_in_file):
+            rects = <stbrp_rect*> PyMem_RawMalloc(len(images) * sizeof(stbrp_rect))
+            for i in range(n_images):
+                if not stbi_info(images[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
-                potential_keys.append(op.splitext(op.basename(im))[0])
-                rects[counter].id = counter
-                rects[counter].w = x + 2 * self.pad
-                rects[counter].h = y + 2 * self.pad
-                counter += 1
+                rects[i].id = i
+                rects[i].w = x + 2 * self.pad
+                rects[i].h = y + 2 * self.pad
 
             # step 2: pack the rects
-            if not stbrp_pack_rects(self.context, rects, counter):
-                raise RuntimeError('Failed to pack rectangles.')
+            if not stbrp_pack_rects(&self.context, rects, n_images):
+                raise RuntimeError('Failed to pack rectangles. Try again with a larger atlas?')
 
             # step 3: read in images and stick in memoryview, accounting for padding 
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
             # TODO: prange outer or inner loop (or both??)?
-
-            for i in range(len(images)):
-                data = stbi_load(images[i], &x, &y, &channels_in_file, 4) # force RGBA
+            for i in range(n_images):
+                _id = rects[i].id
+                data = stbi_load(images[_id], &x, &y, &channels_in_file, 4) # force RGBA
                 if data is NULL:
                     raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
                 
                 # conceptually from https://stackoverflow.com/a/12273365/2690232
+                # loop through source image rows
                 for yy in range(y):
                     source_row = &data[yy * x * 4]
                     # get the subset of the atlas we're writing this row to-- need to account for padding
                     # and global offset within atlas
-                    target_row = &self._atlas[(yy + self.pad + rects[i].y) * x * 4 + rects[i].x + self.pad]
+                    target_row = &self._atlas[(yy + rects[_id].y + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
                     memcpy(target_row, source_row, x * 4 * sizeof(char))
+                
+                PyMem_RawFree(data) # done with the image now
+            
+            # step 4: build up dict with keys
+            for i in range(n_images):
+                _id = rects[i].id
+                self.locs[op.splitext(op.basename(images[_id]))[0]] = {'x': rects[_id].x + self.pad, 
+                                                                       'y': rects[_id].y + self.pad, 
+                                                                       'w': rects[_id].w - 2*self.pad, 
+                                                                       'h': rects[_id].h - 2*self.pad}
 
         # all done (and/or failed), free rects
         finally:
-            PyMem_Free(rects)
+            PyMem_RawFree(rects)
+
 
     @property
-    cpdef atlas(self):
+    def atlas(self):
         cdef array _atlas = array((self.width, self.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
         _atlas.data = <char*> self._atlas
         # we manage the memory internally, so no need to set free callback?
-        return _atlas
+        return _atlas.memview
+    
+    @property
+    def locations(self):
+        return self.locs
 
     def __dealloc__(self):
-        PyMem_Free(self.nodes)
-        PyMem_Free(self._atlas)
+        PyMem_RawFree(self.nodes)
+        PyMem_RawFree(self._atlas)
