@@ -129,7 +129,7 @@ cdef class AtlasPacker:
                     target_row = &self._atlas[(yy + rects[_id].y + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
                     memcpy(target_row, source_row, x * 4 * sizeof(char))
                 
-                PyMem_RawFree(data) # done with the image now
+                PyMem_RawFree(data) # done with the image now (TODO: should use STBI_FREE)
             
             # step 4: build up dict with keys
             for i in range(n_images):

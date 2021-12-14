@@ -9,7 +9,7 @@ extra_compile_args = []
 
 ext = [Extension('patlas',
                  sources=['patlas.pyx'],
-                 extra_compile_args=[],
+                 extra_compile_args=['-O3'],
                  extra_link_args=[])]
 
 with open("README.md", "r") as f:
@@ -25,6 +25,11 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/aforren1/patlas",
     packages=setuptools.find_packages(),
+    entry_points = {
+        'console_scripts': [
+            'patlas = _patlas.util:main'
+        ]
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
