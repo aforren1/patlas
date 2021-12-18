@@ -51,7 +51,7 @@ if __name__ == '__main__':
 
     prog = ctx.program(vertex_shader=image_vert, fragment_shader=image_frag)
 
-    ap = AtlasPacker(2048, 2048, pad=1)
+    ap = AtlasPacker(2048, pad=1)
 
     ap.pack(['images/alex.png', 'images/kazoo.jpg'])
 

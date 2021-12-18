@@ -16,6 +16,8 @@ cdef extern from "Python.h":
     # wasn't fixed until a week ago, so not in any release yet...
     void* PyMem_RawCalloc(size_t nelem, size_t elsize)
 
+# TODO future: custom malloc (e.g. malloc once based off max image size, then keep pulling from that until done?)
+# but I suppose that doesn't parallelize well...
 cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
@@ -67,15 +69,15 @@ cdef class AtlasPacker:
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
 
-    def __init__(self, width: int, height: int, pad: int=2, heuristic: Heuristic=Heuristic.DEFAULT):
-        self.width = width
-        self.height = height
+    def __init__(self, side: int, pad: int=2, heuristic: Heuristic=Heuristic.DEFAULT):
+        self.width = side
+        self.height = side
         self.pad = pad
-        self.num_nodes = width
+        self.num_nodes = 2 * side
         self.heuristic = heuristic
         self.locs = {}
 
-        self.nodes = <stbrp_node*> PyMem_RawMalloc(2 * self.num_nodes * sizeof(stbrp_node))
+        self.nodes = <stbrp_node*> PyMem_RawMalloc(self.num_nodes * sizeof(stbrp_node))
         # we only call init once, so that we can re-use with another call to pack
         if self.nodes == NULL:
             raise RuntimeError('Unable to allocate stbrp_node memory.')
@@ -126,7 +128,8 @@ cdef class AtlasPacker:
                     source_row = &data[yy * x * 4]
                     # get the subset of the atlas we're writing this row to-- need to account for padding
                     # and global offset within atlas
-                    target_row = &self._atlas[(yy + rects[_id].y + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
+                    # TODO: this doesn't work for non-square target images, but I can't reason through why?
+                    target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
                     memcpy(target_row, source_row, x * 4 * sizeof(char))
                 
                 PyMem_RawFree(data) # done with the image now (TODO: should use STBI_FREE)
@@ -134,6 +137,7 @@ cdef class AtlasPacker:
             # step 4: build up dict with keys
             for i in range(n_images):
                 _id = rects[i].id
+                # TODO: should this be uv coords instead?
                 self.locs[op.splitext(op.basename(images[_id]))[0]] = {'x': rects[_id].x + self.pad, 
                                                                        'y': rects[_id].y + self.pad, 
                                                                        'w': rects[_id].w - 2*self.pad, 

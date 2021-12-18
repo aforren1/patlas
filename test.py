@@ -2,7 +2,7 @@ from patlas import AtlasPacker
 from timeit import default_timer
 import matplotlib.pyplot as plt
 
-x = AtlasPacker(2048, 2048, pad = 1)
+x = AtlasPacker(2048, pad = 1)
 
 t0 = default_timer()
 for i in range(5):

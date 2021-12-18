@@ -1,1 +1,1 @@
-stub
+patlas images/* -side 2048 --visualize

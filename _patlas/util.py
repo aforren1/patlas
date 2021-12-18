@@ -10,8 +10,7 @@ def main():
     parser = ArgumentParser(prog = 'patlas', description='Simple texture atlas packer.')
 
     parser.add_argument('files', nargs='+', help='List of files/wildcard things')
-    parser.add_argument('-width', type=int)
-    parser.add_argument('-height', type=int)
+    parser.add_argument('-side', type=int)
     parser.add_argument('-pad', type=int, default=2)
     parser.add_argument('--visualize', action='store_true')
 
@@ -20,7 +19,7 @@ def main():
     files = [glob(x) for x in args.files]
     files = [item for sublist in files for item in sublist]
     
-    ap = AtlasPacker(width=args.width, height=args.height, pad=args.pad)
+    ap = AtlasPacker(side=args.side, pad=args.pad)
     ap.pack(files)
 
     if args.visualize:
