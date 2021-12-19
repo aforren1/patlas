@@ -6,11 +6,13 @@
 #cython: initializedcheck=False
 #cython: cdivision=True
 cimport cython
+cimport openmp
 from cython.view cimport array
 from cpython.mem cimport PyMem_RawMalloc, PyMem_RawFree, PyMem_RawRealloc
 from libc.stdlib cimport malloc, free
-from cython.parallel import prange, parallel
+from cython.parallel import prange, parallel, threadid
 from libc.string cimport memcpy
+
 import os.path as op
 
 cdef extern from "Python.h":
@@ -105,6 +107,10 @@ cdef class AtlasPacker:
         cdef stbrp_rect* rects
         cdef int x, y, yy, channels_in_file, size, _id, i
         cdef int n_images = len(images)
+        cdef int max_threads = openmp.omp_get_max_threads()
+        cdef int* xs
+        cdef int* ys
+        cdef int thread_id # local ID
 
         # step 1: read image attributes
         cdef const char **im_names = to_cstring_array(images)
@@ -113,6 +119,8 @@ cdef class AtlasPacker:
         cdef unsigned char* target_row
         try:
             rects = <stbrp_rect*> malloc(n_images * sizeof(stbrp_rect))
+            xs = <int*> malloc(max_threads * sizeof(int))
+            ys = <int*> malloc(max_threads * sizeof(int))
             for i in range(n_images):
                 if not stbi_info(im_names[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
@@ -129,22 +137,23 @@ cdef class AtlasPacker:
             # for padding ideas
             # TODO: prange outer or inner loop (or both??)?
             with nogil, parallel():
+                thread_id = threadid()
                 for i in prange(n_images, schedule='guided'):
                     _id = rects[i].id
-                    data = stbi_load(im_names[_id], &x, &y, &channels_in_file, 4) # force RGBA
+                    data = stbi_load(im_names[_id], &xs[thread_id], &ys[thread_id], &channels_in_file, 4) # force RGBA
                     if data is NULL:
                         with gil:
                             raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
                     
                     # conceptually from https://stackoverflow.com/a/12273365/2690232
                     # loop through source image rows
-                    for yy in range(y):
-                        source_row = &data[yy * x * 4]
+                    for yy in range(ys[thread_id]):
+                        source_row = &data[yy * xs[thread_id] * 4]
                         # get the subset of the atlas we're writing this row to-- need to account for padding
                         # and global offset within atlas
                         # TODO: this doesn't work for non-square target images, but I can't reason through why?
                         target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
-                        memcpy(target_row, source_row, x * 4 * sizeof(char))
+                        memcpy(target_row, source_row, xs[thread_id] * 4 * sizeof(char))
                     
                     free(data) # done with the image now (TODO: should use STBI_FREE)
                 
@@ -160,6 +169,8 @@ cdef class AtlasPacker:
         # all done (and/or failed), free rects
         finally:
             free(rects)
+            free(xs)
+            free(ys)
             PyMem_RawFree(im_names)
 
 
