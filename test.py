@@ -2,19 +2,27 @@ from patlas import AtlasPacker
 from timeit import default_timer
 import matplotlib.pyplot as plt
 
-x = AtlasPacker(2048, pad = 1)
+# stress
+N = 400; dim = 2 ** 14
+#N = 4; dim = 2 ** 11
+
+x = AtlasPacker(dim, pad = 1)
 
 t0 = default_timer()
-for i in range(5):
+for i in range(N):
     x.pack(['images/alex.png', 'images/kazoo.jpg'])
 
-# funnily enough, packing all at once does worse than incremental?
-#x.pack(['images/alex.png', 'images/kazoo.jpg']*4)
 t1 = default_timer() - t0
 print(f'Packing time: {t1} sec')
-y = x.atlas
+# funnily enough, packing all at once does worse than incremental?
+z = AtlasPacker(dim, pad = 1)
+t0 = default_timer()
+z.pack(['images/alex.png', 'images/kazoo.jpg']*N)
+t1 = default_timer() - t0
+print(f'Packing time: {t1} sec')
 
-print(y.shape)
-print(x.locations)
-plt.imshow(y, origin='lower')
+plt.imshow(x.atlas, origin='lower')
+plt.show()
+
+plt.imshow(z.atlas, origin='lower')
 plt.show()

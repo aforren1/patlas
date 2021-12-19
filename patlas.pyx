@@ -8,11 +8,13 @@
 cimport cython
 from cython.view cimport array
 from cpython.mem cimport PyMem_RawMalloc, PyMem_RawFree, PyMem_RawRealloc
-#from cython.parallel import prange
+from libc.stdlib cimport malloc, free
+from cython.parallel import prange, parallel
 from libc.string cimport memcpy
 import os.path as op
 
 cdef extern from "Python.h":
+    char* PyUnicode_AsUTF8(object unicode)
     # wasn't fixed until a week ago, so not in any release yet...
     void* PyMem_RawCalloc(size_t nelem, size_t elsize)
 
@@ -22,18 +24,18 @@ cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
-    #define STBI_MALLOC PyMem_RawMalloc
-    #define STBI_FREE PyMem_RawFree
-    #define STBI_REALLOC PyMem_RawRealloc
+    //#define STBI_MALLOC PyMem_RawMalloc
+    //#define STBI_FREE PyMem_RawFree
+    //#define STBI_REALLOC PyMem_RawRealloc
     """
 
-cdef extern from 'stb/stb_image.h':
+cdef extern from 'stb/stb_image.h' nogil:
     int stbi_info(const char* filename, int *x, int *y, int *comp)
     unsigned char* stbi_load(const char* filename, int *x, int *y, int *channels_in_file, int desired_channels)
     void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
     const char* stbi_failure_reason()
 
-cdef extern from "stb/stb_rect_pack.h":
+cdef extern from "stb/stb_rect_pack.h" nogil:
     struct stbrp_context:
         pass
 
@@ -54,6 +56,15 @@ cpdef enum Heuristic:
     DEFAULT = 0
     BL_SORTHEIGHT = DEFAULT
     BF_SORTHEIGHT
+
+# from https://stackoverflow.com/a/54081075/2690232
+cdef char ** to_cstring_array(list_str):
+    cdef int len_list = len(list_str)
+    cdef int i
+    cdef char **ret = <char **>PyMem_RawMalloc(len_list * sizeof(char *))
+    for i in range(len_list):
+        ret[i] = PyUnicode_AsUTF8(list_str[i])
+    return ret
 
 @cython.no_gc_clear
 @cython.final # allow nogil for pack
@@ -92,17 +103,18 @@ cdef class AtlasPacker:
         # return nothing for now (or just warning/err)-- on request, give memoryview & dict
         # TODO: release GIL
         cdef stbrp_rect* rects
-        cdef int x, y, yy, channels_in_file, size, _id, n_images
-        n_images = len(images)
+        cdef int x, y, yy, channels_in_file, size, _id, i
+        cdef int n_images = len(images)
 
         # step 1: read image attributes
+        cdef const char **im_names = to_cstring_array(images)
         cdef unsigned char* data
         cdef unsigned char* source_row
         cdef unsigned char* target_row
         try:
-            rects = <stbrp_rect*> PyMem_RawMalloc(len(images) * sizeof(stbrp_rect))
+            rects = <stbrp_rect*> malloc(n_images * sizeof(stbrp_rect))
             for i in range(n_images):
-                if not stbi_info(images[i], &x, &y, &channels_in_file):
+                if not stbi_info(im_names[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
                 rects[i].id = i
                 rects[i].w = x + 2 * self.pad
@@ -116,24 +128,26 @@ cdef class AtlasPacker:
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
             # TODO: prange outer or inner loop (or both??)?
-            for i in range(n_images):
-                _id = rects[i].id
-                data = stbi_load(images[_id], &x, &y, &channels_in_file, 4) # force RGBA
-                if data is NULL:
-                    raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
+            with nogil, parallel():
+                for i in prange(n_images, schedule='guided'):
+                    _id = rects[i].id
+                    data = stbi_load(im_names[_id], &x, &y, &channels_in_file, 4) # force RGBA
+                    if data is NULL:
+                        with gil:
+                            raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
+                    
+                    # conceptually from https://stackoverflow.com/a/12273365/2690232
+                    # loop through source image rows
+                    for yy in range(y):
+                        source_row = &data[yy * x * 4]
+                        # get the subset of the atlas we're writing this row to-- need to account for padding
+                        # and global offset within atlas
+                        # TODO: this doesn't work for non-square target images, but I can't reason through why?
+                        target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
+                        memcpy(target_row, source_row, x * 4 * sizeof(char))
+                    
+                    free(data) # done with the image now (TODO: should use STBI_FREE)
                 
-                # conceptually from https://stackoverflow.com/a/12273365/2690232
-                # loop through source image rows
-                for yy in range(y):
-                    source_row = &data[yy * x * 4]
-                    # get the subset of the atlas we're writing this row to-- need to account for padding
-                    # and global offset within atlas
-                    # TODO: this doesn't work for non-square target images, but I can't reason through why?
-                    target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
-                    memcpy(target_row, source_row, x * 4 * sizeof(char))
-                
-                PyMem_RawFree(data) # done with the image now (TODO: should use STBI_FREE)
-            
             # step 4: build up dict with keys
             for i in range(n_images):
                 _id = rects[i].id
@@ -145,7 +159,8 @@ cdef class AtlasPacker:
 
         # all done (and/or failed), free rects
         finally:
-            PyMem_RawFree(rects)
+            free(rects)
+            PyMem_RawFree(im_names)
 
 
     @property

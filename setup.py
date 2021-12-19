@@ -9,8 +9,8 @@ extra_compile_args = []
 
 ext = [Extension('patlas',
                  sources=['patlas.pyx'],
-                 extra_compile_args=['-O3'],
-                 extra_link_args=[])]
+                 extra_compile_args=['-fopenmp'],
+                 extra_link_args=['-fopenmp'])]
 
 with open("README.md", "r") as f:
     long_description = f.read()
