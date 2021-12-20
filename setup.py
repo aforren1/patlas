@@ -7,17 +7,17 @@ from setuptools.extension import Extension
 eca = []
 ela = []
 
-if environ.get('OMP'):
-    if sys.platform == 'win32':
-        eca.append('/openmp')
-        ela.append('/openmp')
+#if environ.get('OMP'):
+if sys.platform == 'win32':
+    eca.append('/openmp')
+    ela.append('/openmp')
+else:
+    if sys.platform == 'darwin':
+        eca.append('-Xpreprocessor')
+        ela.append('-lomp')
     else:
-        if sys.platform == 'darwin':
-            eca.append('-Xpreprocessor')
-            ela.append('-lomp')
-        else:
-            ela.append('-fopenmp')
-        
+        ela.append('-fopenmp')
+    
     eca.append('-fopenmp')
 
 ext = [Extension('patlas',

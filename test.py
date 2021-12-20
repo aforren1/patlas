@@ -3,7 +3,7 @@ from timeit import default_timer
 import pathlib
 
 # stress
-N = 200; dim = 2 ** 14
+N = 100; dim = 2 ** 13
 # non-stress
 #N = 4; dim = 2 ** 11
 
