@@ -1,20 +1,23 @@
 import setuptools
 import sys
+from os import environ
 from Cython.Build import cythonize
 from setuptools.extension import Extension
 
 eca = []
 ela = []
-if sys.platform == 'win32':
-    eca.append('/openmp')
-    ela.append('/openmp')
-else:
-    if sys.platform == 'darwin':
-        eca.append('-Xpreprocessor')
-        ela.append('-lomp')
+
+if environ.get('OMP'):
+    if sys.platform == 'win32':
+        eca.append('/openmp')
+        ela.append('/openmp')
     else:
-        ela.append('-fopenmp')
-    
+        if sys.platform == 'darwin':
+            eca.append('-Xpreprocessor')
+            ela.append('-lomp')
+        else:
+            ela.append('-fopenmp')
+        
     eca.append('-fopenmp')
 
 ext = [Extension('patlas',

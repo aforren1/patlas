@@ -3,7 +3,7 @@ name: Build
 on: [push]
 
 env:
-  CIBW_SKIP: pp* *-manylinux_i686 *-win32
+  CIBW_SKIP: pp* *-manylinux_i686 *-musllinux_*
   CIBW_BEFORE_BUILD: git submodule update --init --recursive
   CIBW_BEFORE_BUILD_MACOS: $CIBW_BEFORE_BUILD && brew install libomp
   CIBW_TEST_COMMAND: python {project}/test.py

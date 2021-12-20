@@ -1,2 +1,4 @@
-global-include *.pyx
-global-include *.h
+include patlas.pyx
+include stb/stb_image.h
+include stb/stb_rect_pack.h
+include LICENSE
