@@ -1,6 +1,5 @@
 from patlas import AtlasPacker
 from timeit import default_timer
-import matplotlib.pyplot as plt
 
 # stress
 N = 400; dim = 2 ** 14
@@ -21,8 +20,10 @@ z.pack(['images/alex.png', 'images/kazoo.jpg']*N)
 t1 = default_timer() - t0
 print(f'Packing time: {t1} sec')
 
-plt.imshow(x.atlas, origin='lower')
-plt.show()
+if False:
+    import matplotlib.pyplot as plt
+    plt.imshow(x.atlas, origin='lower')
+    plt.show()
 
-plt.imshow(z.atlas, origin='lower')
-plt.show()
+    plt.imshow(z.atlas, origin='lower')
+    plt.show()
