@@ -15,6 +15,7 @@ from libc.string cimport memcpy
 
 import pickle as pkl
 import os.path as op
+import zlib
 
 cdef extern from "Python.h":
     char* PyUnicode_AsUTF8(object unicode)
@@ -220,7 +221,7 @@ cdef class AtlasPacker:
         cdef array temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
         temp.data = <char *> encoded
         with open(f'{name}.patlas', 'wb') as f:
-            pkl.dump((bytes(memoryview(temp)), self.locations), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
+            pkl.dump((zlib.compress(memoryview(temp), 1), self.locations), f, 5) # TODO: pkl.DEFAULT_PROTOCOL?
         
         free(encoded) # TODO: should be QOI_FREE
 
@@ -231,9 +232,9 @@ cdef class AtlasPacker:
 
 cpdef load(filename: str):
     # load a .patlas file
-    cdef list lst
     with open(filename, 'rb') as f:
         raw_atlas, locations = pkl.load(f)
+        raw_atlas = zlib.decompress(raw_atlas)
     
     cdef int len_data = len(raw_atlas)
     cdef const unsigned char[:] mview = raw_atlas
