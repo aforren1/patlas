@@ -3,14 +3,22 @@ import sys
 from Cython.Build import cythonize
 from setuptools.extension import Extension
 
-extra_compile_args = []
-# if sys.platform == 'linux':
-#     extra_compile_args.append('-g0')
+eca = []
+ela = []
+if sys.platform == 'win32':
+    eca.append('/openmp')
+    ela.append('/openmp')
+else:
+    eca.append('-fopenmp')
+    if sys.platform == 'darwin':
+        ela.append('-lomp')
+    else:
+        ela.append('-fopenmp')
 
 ext = [Extension('patlas',
                  sources=['patlas.pyx'],
-                 extra_compile_args=['-fopenmp'],
-                 extra_link_args=['-fopenmp'])]
+                 extra_compile_args=eca,
+                 extra_link_args=ela)]
 
 with open("README.md", "r") as f:
     long_description = f.read()
