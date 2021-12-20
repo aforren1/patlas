@@ -26,6 +26,9 @@ cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
+    #ifndef _OPENMP
+        #define omp_get_max_threads() 1
+    #endif
     //#define STBI_MALLOC PyMem_RawMalloc
     //#define STBI_FREE PyMem_RawFree
     //#define STBI_REALLOC PyMem_RawRealloc
