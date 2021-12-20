@@ -43,7 +43,7 @@ with timer('Load'):
 
 assert bytes(loaded_atlas) == bytes(x.atlas)
 
-if True:
+if False:
     import matplotlib.pyplot as plt
     from PIL import Image
     import numpy as np
