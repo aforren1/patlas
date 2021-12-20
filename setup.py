@@ -9,11 +9,13 @@ if sys.platform == 'win32':
     eca.append('/openmp')
     ela.append('/openmp')
 else:
-    eca.append('-fopenmp')
     if sys.platform == 'darwin':
+        eca.append('-Xpreprocessor')
         ela.append('-lomp')
     else:
         ela.append('-fopenmp')
+    
+    eca.append('-fopenmp')
 
 ext = [Extension('patlas',
                  sources=['patlas.pyx'],
