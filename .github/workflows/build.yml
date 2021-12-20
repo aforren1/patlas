@@ -8,6 +8,7 @@ env:
   CIBW_BEFORE_BUILD_MACOS: $CIBW_BEFORE_BUILD && brew install libomp
   CIBW_TEST_COMMAND: python {project}/test.py
   CIBW_ARCHS_LINUX: auto aarch64
+  OMP: 1
 
 jobs:
   build_wheels:
