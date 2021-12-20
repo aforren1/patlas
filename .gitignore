@@ -7,3 +7,5 @@ build/
 cython_debug/
 .vscode/
 dist/
+*.patlas
+test.png

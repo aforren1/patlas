@@ -13,6 +13,7 @@ from libc.stdlib cimport malloc, free
 from cython.parallel import prange, parallel, threadid
 from libc.string cimport memcpy
 
+import pickle as pkl
 import os.path as op
 
 cdef extern from "Python.h":
@@ -26,6 +27,7 @@ cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
+    #define QOI_IMPLEMENTATION
     #ifndef _OPENMP
         #define omp_get_max_threads() 1
     #endif
@@ -56,6 +58,16 @@ cdef extern from "stb/stb_rect_pack.h" nogil:
     int stbrp_pack_rects(stbrp_context *context, stbrp_rect *rects, int num_rects)
     void stbrp_init_target(stbrp_context *context, int width, int height, stbrp_node *nodes, int num_nodes)
     void stbrp_setup_heuristic(stbrp_context *context, int heuristic)
+
+cdef extern from 'qoi/qoi.h':
+    ctypedef struct qoi_desc:
+        unsigned int width
+        unsigned int height
+        unsigned char channels
+        unsigned char colorspace
+    
+    void* qoi_encode(const void *data, const qoi_desc *desc, int *out_len)
+    void* qoi_decode(const void *data, int size, qoi_desc *desc, int channels)
 
 cpdef enum Heuristic:
     DEFAULT = 0
@@ -188,6 +200,49 @@ cdef class AtlasPacker:
     def locations(self):
         return self.locs
 
+    def save(self, name: str):
+        # TODO: option to use .png instead? Slower but smaller
+        # dump the dictionary and atlas into a pickle
+        # the atlas is encoded as .qoi
+        cdef void* encoded
+        cdef qoi_desc desc
+        cdef int size
+
+        desc.width = self.width
+        desc.height = self.height
+        desc.channels = 4
+        desc.colorspace = 0 # unused
+
+        encoded = qoi_encode(self._atlas, &desc, &size)
+        if encoded is NULL:
+            raise RuntimeError('Failed to encode atlas.')
+        
+        cdef array temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
+        temp.data = <char *> encoded
+        with open(f'{name}.patlas', 'wb') as f:
+            pkl.dump((bytes(memoryview(temp)), self.locations), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
+        
+        free(encoded) # TODO: should be QOI_FREE
+
     def __dealloc__(self):
         PyMem_RawFree(self.nodes)
         PyMem_RawFree(self._atlas)
+
+
+cpdef load(filename: str):
+    # load a .patlas file
+    cdef list lst
+    with open(filename, 'rb') as f:
+        raw_atlas, locations = pkl.load(f)
+    
+    cdef int len_data = len(raw_atlas)
+    cdef const unsigned char[:] mview = raw_atlas
+    cdef qoi_desc desc
+    cdef void* temp = qoi_decode(<const void*> &mview[0], len_data, &desc, 4)
+    if temp is NULL:
+        raise RuntimeError('Unable to load .qoi image from .patlas file.')
+    
+    cdef array _atlas = array((desc.width, desc.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
+    _atlas.data = <char *> temp
+    _atlas.callback_free_data = free
+    return _atlas, locations

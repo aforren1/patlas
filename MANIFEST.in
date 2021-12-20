@@ -1,4 +1,5 @@
 include patlas.pyx
 include stb/stb_image.h
 include stb/stb_rect_pack.h
-include LICENSE
+include qoi/qoi.h
+global-include LICENSE
