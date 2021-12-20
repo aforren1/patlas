@@ -49,12 +49,15 @@ if False:
     import numpy as np
     plt.imshow(x.atlas, origin='lower')
     plt.show()
-    
-    with timer('PIL convert'):
-        im = Image.fromarray(np.array(x.atlas))
+
+    plt.imshow(z.atlas, origin='lower')
+    plt.show()
+
+    im = Image.fromarray(np.array(x.atlas))
     
     with timer('PIL save PNG'):
         im.save('test.png')
 
-    plt.imshow(z.atlas, origin='lower')
-    plt.show()
+    with timer('PIL load PNG'):
+        with Image.open('test.png') as im:
+            a = np.asarray(im)
