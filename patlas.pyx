@@ -28,6 +28,7 @@ cdef extern from *:
     """
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
+    #define STB_DXT_IMPLEMENTATION
     #define QOI_IMPLEMENTATION
     #define QOI_NO_STDIO
     #ifndef _OPENMP
@@ -41,7 +42,7 @@ cdef extern from 'stb/stb_image.h' nogil:
     void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
     const char* stbi_failure_reason()
 
-cdef extern from "stb/stb_rect_pack.h" nogil:
+cdef extern from 'stb/stb_rect_pack.h' nogil:
     struct stbrp_context:
         pass
 
@@ -58,7 +59,10 @@ cdef extern from "stb/stb_rect_pack.h" nogil:
     void stbrp_init_target(stbrp_context *context, int width, int height, stbrp_node *nodes, int num_nodes)
     void stbrp_setup_heuristic(stbrp_context *context, int heuristic)
 
-cdef extern from 'qoi/qoi.h':
+cdef extern from 'stb/stb_dxt.h' nogil:
+    void stb_compress_dxt_block(unsigned char* dest, const unsigned char* src_rgba_four_bytes_per_pixel, int alpha, int mode)
+
+cdef extern from 'qoi/qoi.h' nogil:
     ctypedef struct qoi_desc:
         unsigned int width
         unsigned int height
@@ -69,9 +73,12 @@ cdef extern from 'qoi/qoi.h':
     void* qoi_decode(const void *data, int size, qoi_desc *desc, int channels)
 
 cpdef enum Heuristic:
-    DEFAULT = 0
-    BL_SORTHEIGHT = DEFAULT
+    BL_SORTHEIGHT = 0
     BF_SORTHEIGHT
+
+cpdef enum TextureFormat:
+    RGBA8 = 0x1908
+    DXT5 = 0x83F3
 
 # from https://stackoverflow.com/a/54081075/2690232
 cdef char ** to_cstring_array(list_str):
@@ -92,18 +99,28 @@ cdef class AtlasPacker:
     cdef int num_nodes
     cdef int heuristic
     cdef readonly dict metadata
+    cdef readonly TextureFormat texture_format 
     # 
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
     cdef array _cyatlas
 
-    def __init__(self, side: int, pad: int=2, heuristic: Heuristic=Heuristic.DEFAULT):
+    cdef unsigned char* _dxt5
+    cdef array _cydxt5
+
+    def __init__(self, side: int, pad: int=2, 
+                 heuristic: Heuristic=Heuristic.BL_SORTHEIGHT,
+                 texture_format: TextureFormat=TextureFormat.RGBA8):
         self.width = side
         self.height = side
+        if texture_format == TextureFormat.DXT5 and (self.width % 4 != 0 or self.height % 4 != 0):
+            raise RuntimeError('Each side of DXT5 texture must be a multiple of 4.')
+        
         self.pad = pad
         self.num_nodes = 2 * side
         self.heuristic = heuristic
-        self.metadata = {}
+        self.texture_format = texture_format
+        self.metadata = {'texture_format': texture_format, 'images': {}}
 
         self.nodes = <stbrp_node*> PyMem_RawMalloc(self.num_nodes * sizeof(stbrp_node))
         # we only call init once, so that we can re-use with another call to pack
@@ -114,6 +131,12 @@ cdef class AtlasPacker:
         self._atlas = <unsigned char*> PyMem_RawCalloc(self.width * self.height * 4, sizeof(char))
         self._cyatlas = array((self.width, self.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
         self._cyatlas.data = <char*> self._atlas
+
+        if texture_format == TextureFormat.DXT5:
+            self._dxt5 = <unsigned char*> PyMem_RawCalloc(self.width * self.height, sizeof(char))
+            self._cydxt5 = array((self.width, self.height, 1), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
+            self._cydxt5.data = <char*> self._dxt5
+        
         stbi_set_flip_vertically_on_load(1) # set bottom-left as start
 
 
@@ -156,7 +179,7 @@ cdef class AtlasPacker:
                     data = stbi_load(im_names[i], &xys[thread_idx], &xys[thread_idx+1], &channels_in_file, 4) # force RGBA
                     if data is NULL:
                         with gil:
-                            raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
+                            raise RuntimeError('Image failed to load. %s' % stbi_failure_reason())
                     
                     # conceptually from https://stackoverflow.com/a/12273365/2690232
                     # loop through source image rows
@@ -167,7 +190,7 @@ cdef class AtlasPacker:
                         # TODO: this doesn't work for non-square target images, but I can't reason through why?
                         target_row = &self._atlas[(rects[i].y + yy + self.pad) * self.width * 4 + (rects[i].x + self.pad) * 4]
                         memcpy(target_row, source_row, xys[thread_idx] * 4 * sizeof(char))
-                    
+
                     free(data) # done with the image now (TODO: should use STBI_FREE)
                 
             # step 4: build up dict with keys
@@ -178,10 +201,10 @@ cdef class AtlasPacker:
                 h = rects[i].h - 2*self.pad
                 # TODO: store as array [u0 v0 u1 v1] or like this?
                 # This is more descriptive, but more typing on the user side
-                self.metadata[op.splitext(op.basename(images[i]))[0]] = {'u0': x / <double>self.width,
-                                                                         'v0': y / <double>self.height,
-                                                                         'u1': (x + w) / <double>self.width,
-                                                                         'v1': (y + h) / <double>self.height}
+                self.metadata['images'][op.splitext(op.basename(images[i]))[0]] = {'u0': x / <double>self.width,
+                                                                                   'v0': y / <double>self.height,
+                                                                                   'u1': (x + w) / <double>self.width,
+                                                                                   'v1': (y + h) / <double>self.height}
 
         # all done (and/or failed), free
         finally:
@@ -191,7 +214,14 @@ cdef class AtlasPacker:
 
     @property
     def atlas(self):
-        return self._cyatlas.memview
+        if self.texture_format == TextureFormat.RGBA8:
+            return self._cyatlas.memview
+        elif self.texture_format == TextureFormat.DXT5:
+            # we can't compress during atlas packing, because we don't know what adjacent pixels will be
+            return self.compress_dxt5()
+    
+    cdef compress_dxt5(self):
+        pass
 
     def save(self, name: str):
         # TODO: option to use .png instead? Slower but smaller
@@ -222,14 +252,16 @@ cdef class AtlasPacker:
     def __dealloc__(self):
         PyMem_RawFree(self.nodes)
         PyMem_RawFree(self._atlas)
+        PyMem_RawFree(self._dxt5) # unconditional?
 
 
 cpdef load(filename: str):
     # load a .patlas file
     cdef bytes raw_atlas
-    cdef dict locations
+    cdef dict metadata
+    cdef int texture_format
     with open(filename, 'rb') as f:
-        raw_atlas, locations = pkl.load(f)
+        raw_atlas, metadata = pkl.load(f)
 
     cdef const unsigned char[:] mview = zlib.decompress(raw_atlas)
     cdef int len_data = mview.shape[0]
@@ -241,4 +273,4 @@ cpdef load(filename: str):
     cdef array _atlas = array((desc.width, desc.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
     _atlas.data = <char *> temp
     _atlas.callback_free_data = free
-    return _atlas, locations
+    return _atlas, metadata
