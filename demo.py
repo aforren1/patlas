@@ -1,7 +1,6 @@
 import moderngl as mgl
 import glfw
 import numpy as np
-import glm
 from patlas import AtlasPacker
 
 image_vert = """
@@ -74,12 +73,12 @@ if __name__ == '__main__':
     while not glfw.window_should_close(win):
         ctx.clear(0.2, 0.1, 0.1)
         # cat 1
-        prog['offset'].write(glm.vec2(1, 1))
+        prog['offset'] = 1, 1
         vbo['texcoord'] = atex
         buf.write(vbo)
         vao.render(mgl.TRIANGLE_STRIP)
         # cat 2
-        prog['offset'].write(glm.vec2(0.5, 0))
+        prog['offset'] = 0.5, 0
         vbo['texcoord'] = ktex
         buf.write(vbo)
         vao.render(mgl.TRIANGLE_STRIP)
