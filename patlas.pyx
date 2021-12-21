@@ -227,12 +227,13 @@ cdef class AtlasPacker:
 
 cpdef load(filename: str):
     # load a .patlas file
+    cdef bytes raw_atlas
+    cdef dict locations
     with open(filename, 'rb') as f:
         raw_atlas, locations = pkl.load(f)
-        raw_atlas = zlib.decompress(raw_atlas)
-    
-    cdef int len_data = len(raw_atlas)
-    cdef const unsigned char[:] mview = raw_atlas
+
+    cdef const unsigned char[:] mview = zlib.decompress(raw_atlas)
+    cdef int len_data = mview.shape[0]
     cdef qoi_desc desc
     cdef void* temp = qoi_decode(<const void*> &mview[0], len_data, &desc, 4)
     if temp is NULL:
