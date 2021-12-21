@@ -65,13 +65,13 @@ if __name__ == '__main__':
     buf = ctx.buffer(tmp)
     vao = ctx.vertex_array(prog, buf, 'vertices', 'texcoord')
 
-    a = ap.locations['alex']
+    a = ap.metadata['alex']
     atex = np.array([(a['x'] / ax, a['y'] / ay),
                      (a['x'] / ax, (a['y'] + a['h']) / ay),
                      ((a['x'] + a['w']) / ax, a['y'] / ay),
                      ((a['x'] + a['w']) / ax, (a['y'] + a['h']) / ay)], 
                      dtype='f4')
-    k = ap.locations['kazoo']
+    k = ap.metadata['kazoo']
     ktex = np.array([(k['x'] / ax, k['y'] / ay),
                      (k['x'] / ax, (k['y'] + k['h']) / ay),
                      ((k['x'] + k['w']) / ax, k['y'] / ay),

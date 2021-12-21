@@ -93,7 +93,7 @@ cdef class AtlasPacker:
     cdef int pad
     cdef int num_nodes
     cdef int heuristic
-    cdef readonly dict locs
+    cdef readonly dict metadata
     # 
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
@@ -104,7 +104,7 @@ cdef class AtlasPacker:
         self.pad = pad
         self.num_nodes = 2 * side
         self.heuristic = heuristic
-        self.locs = {}
+        self.metadata = {}
 
         self.nodes = <stbrp_node*> PyMem_RawMalloc(self.num_nodes * sizeof(stbrp_node))
         # we only call init once, so that we can re-use with another call to pack
@@ -177,10 +177,10 @@ cdef class AtlasPacker:
             for i in range(n_images):
                 _id = rects[i].id
                 # TODO: should this be uv coords instead?
-                self.locs[op.splitext(op.basename(images[_id]))[0]] = {'x': rects[_id].x + self.pad, 
-                                                                       'y': rects[_id].y + self.pad, 
-                                                                       'w': rects[_id].w - 2*self.pad, 
-                                                                       'h': rects[_id].h - 2*self.pad}
+                self.metadata[op.splitext(op.basename(images[_id]))[0]] = {'x': rects[_id].x + self.pad,
+                                                                           'y': rects[_id].y + self.pad,
+                                                                           'w': rects[_id].w - 2*self.pad,
+                                                                           'h': rects[_id].h - 2*self.pad}
 
         # all done (and/or failed), free rects
         finally:
@@ -196,10 +196,6 @@ cdef class AtlasPacker:
         _atlas.data = <char*> self._atlas
         # we manage the memory internally, so no need to set free callback?
         return _atlas.memview
-    
-    @property
-    def locations(self):
-        return self.locs
 
     def save(self, name: str):
         # TODO: option to use .png instead? Slower but smaller
@@ -221,7 +217,7 @@ cdef class AtlasPacker:
         cdef array temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
         temp.data = <char *> encoded
         with open(f'{name}.patlas', 'wb') as f:
-            pkl.dump((zlib.compress(memoryview(temp), 1), self.locations), f, 5) # TODO: pkl.DEFAULT_PROTOCOL?
+            pkl.dump((zlib.compress(memoryview(temp), 1), self.metadata), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
         
         free(encoded) # TODO: should be QOI_FREE
 
