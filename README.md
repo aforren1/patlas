@@ -18,7 +18,7 @@ ap.save('atlas') # serialize as custom .patlas file
 atlas, metadata = load('atlas.patlas')
 ```
 
-
+See [demo.py](https://github.com/aforren1/patlas/blob/main/demo.py) for example usage with [ModernGL](https://github.com/moderngl/moderngl).
 
 Features/limitations:
 
