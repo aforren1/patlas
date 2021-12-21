@@ -29,13 +29,11 @@ void main()
 """
 
 if __name__ == '__main__':
-    import sys
-
     if not glfw.init():
         raise RuntimeError('GLFW failed.')
     
-    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 5)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
     glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
     glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
     glfw.window_hint(glfw.VISIBLE, True)
@@ -56,40 +54,34 @@ if __name__ == '__main__':
     ap.pack(['images/alex.png', 'images/kazoo.jpg'])
 
     atlas = ap.atlas
-    ax, ay = atlas.shape[0:2]
     tex = ctx.texture(atlas.shape[0:2], atlas.shape[2], atlas)
 
-    tmp = np.empty(4, dtype=[('vertices', np.float32, 2), ('texcoord', np.float32, 2)])
-    tmp['vertices'] = [(-1, -1), (-1, -0.25), (-0.25, -1), (-0.25, -0.25)]
-    tmp['texcoord'] = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    buf = ctx.buffer(tmp)
+    vbo = np.empty(4, dtype=[('vertices', np.float32, 2), ('texcoord', np.float32, 2)])
+    vbo['vertices'] = [(-1, -1), (-1, -0.25), (-0.25, -1), (-0.25, -0.25)]
+    vbo['texcoord'] = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    buf = ctx.buffer(vbo)
     vao = ctx.vertex_array(prog, buf, 'vertices', 'texcoord')
 
     a = ap.metadata['alex']
-    atex = np.array([(a['x'] / ax, a['y'] / ay),
-                     (a['x'] / ax, (a['y'] + a['h']) / ay),
-                     ((a['x'] + a['w']) / ax, a['y'] / ay),
-                     ((a['x'] + a['w']) / ax, (a['y'] + a['h']) / ay)], 
+    atex = np.array([(a['u0'], a['v0']), (a['u0'], a['v1']),
+                     (a['u1'], a['v0']), (a['u1'], a['v1'])],
                      dtype='f4')
     k = ap.metadata['kazoo']
-    ktex = np.array([(k['x'] / ax, k['y'] / ay),
-                     (k['x'] / ax, (k['y'] + k['h']) / ay),
-                     ((k['x'] + k['w']) / ax, k['y'] / ay),
-                     ((k['x'] + k['w']) / ax, (k['y'] + k['h']) / ay)], 
+    ktex = np.array([(k['u0'], k['v0']), (k['u0'], k['v1']),
+                     (k['u1'], k['v0']), (k['u1'], k['v1'])],
                      dtype='f4')
     tex.use()
     while not glfw.window_should_close(win):
         ctx.clear(0.2, 0.1, 0.1)
         # cat 1
         prog['offset'].write(glm.vec2(1, 1))
-        tmp['texcoord'] = atex
-        buf.write(tmp)
+        vbo['texcoord'] = atex
+        buf.write(vbo)
         vao.render(mgl.TRIANGLE_STRIP)
-
         # cat 2
         prog['offset'].write(glm.vec2(0.5, 0))
-        tmp['texcoord'] = ktex
-        buf.write(tmp)
+        vbo['texcoord'] = ktex
+        buf.write(vbo)
         vao.render(mgl.TRIANGLE_STRIP)
         glfw.swap_buffers(win)
         glfw.poll_events()

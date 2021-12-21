@@ -118,14 +118,13 @@ cdef class AtlasPacker:
 
     cpdef pack(self, images: list[str]):
         # take list of image paths
-        # return nothing for now (or just warning/err)-- on request, give memoryview & dict
+        # return nothing (or just warning/err)
         cdef stbrp_rect* rects
-        cdef int x, y, yy, channels_in_file, size, _id, i
+        cdef int x, y, yy, channels_in_file, size, _id, i, w, h
         cdef int n_images = len(images)
         cdef int max_threads = openmp.omp_get_max_threads()
-        cdef int* xs
-        cdef int* ys
-        cdef int thread_id # local ID
+        cdef int* xys # interleaved x,y (so e.g. xy[0] is x and xy[1] is y)
+        cdef int thread_id, thread_idx # local ID & index
 
         # step 1: read image attributes
         cdef const char **im_names = to_cstring_array(images)
@@ -134,8 +133,7 @@ cdef class AtlasPacker:
         cdef unsigned char* target_row
         try:
             rects = <stbrp_rect*> malloc(n_images * sizeof(stbrp_rect))
-            xs = <int*> malloc(max_threads * sizeof(int))
-            ys = <int*> malloc(max_threads * sizeof(int))
+            xys = <int*> malloc(max_threads * 2 * sizeof(int))
             for i in range(n_images):
                 if not stbi_info(im_names[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
@@ -152,39 +150,44 @@ cdef class AtlasPacker:
             # for padding ideas
             with nogil, parallel():
                 thread_id = threadid()
+                thread_idx = thread_id * 2
                 for i in prange(n_images, schedule='guided'):
                     _id = rects[i].id
-                    data = stbi_load(im_names[_id], &xs[thread_id], &ys[thread_id], &channels_in_file, 4) # force RGBA
+                    data = stbi_load(im_names[_id], &xys[thread_idx], &xys[thread_idx+1], &channels_in_file, 4) # force RGBA
                     if data is NULL:
                         with gil:
                             raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
                     
                     # conceptually from https://stackoverflow.com/a/12273365/2690232
                     # loop through source image rows
-                    for yy in range(ys[thread_id]):
-                        source_row = &data[yy * xs[thread_id] * 4]
+                    for yy in range(xys[thread_idx+1]):
+                        source_row = &data[yy * xys[thread_idx] * 4]
                         # get the subset of the atlas we're writing this row to-- need to account for padding
                         # and global offset within atlas
                         # TODO: this doesn't work for non-square target images, but I can't reason through why?
                         target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
-                        memcpy(target_row, source_row, xs[thread_id] * 4 * sizeof(char))
+                        memcpy(target_row, source_row, xys[thread_idx] * 4 * sizeof(char))
                     
                     free(data) # done with the image now (TODO: should use STBI_FREE)
                 
             # step 4: build up dict with keys
             for i in range(n_images):
                 _id = rects[i].id
-                # TODO: should this be uv coords instead?
-                self.metadata[op.splitext(op.basename(images[_id]))[0]] = {'x': rects[_id].x + self.pad,
-                                                                           'y': rects[_id].y + self.pad,
-                                                                           'w': rects[_id].w - 2*self.pad,
-                                                                           'h': rects[_id].h - 2*self.pad}
+                x = rects[_id].x + self.pad
+                y = rects[_id].y + self.pad
+                w = rects[_id].w - 2*self.pad
+                h = rects[_id].h - 2*self.pad
+                # TODO: store as array [u0 v0 u1 v1] or like this?
+                # This is more descriptive, but more typing on the user side
+                self.metadata[op.splitext(op.basename(images[_id]))[0]] = {'u0': x / <double>self.width,
+                                                                           'v0': y / <double>self.height,
+                                                                           'u1': (x + w) / <double>self.width,
+                                                                           'v1': (y + h) / <double>self.height}
 
         # all done (and/or failed), free
         finally:
             free(rects)
-            free(xs)
-            free(ys)
+            free(xys)
             PyMem_RawFree(im_names)
 
 
@@ -202,6 +205,7 @@ cdef class AtlasPacker:
         cdef void* encoded
         cdef qoi_desc desc
         cdef int size
+        cdef array temp
 
         desc.width = self.width
         desc.height = self.height
@@ -212,12 +216,13 @@ cdef class AtlasPacker:
         if encoded is NULL:
             raise RuntimeError('Failed to encode atlas.')
         
-        cdef array temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
-        temp.data = <char *> encoded
-        with open(f'{name}.patlas', 'wb') as f:
-            pkl.dump((zlib.compress(memoryview(temp), 1), self.metadata), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
-        
-        free(encoded) # TODO: should be QOI_FREE
+        try:
+            temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
+            temp.data = <char *> encoded
+            with open(f'{name}.patlas', 'wb') as f:
+                pkl.dump((zlib.compress(memoryview(temp), 1), self.metadata), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
+        finally:
+            free(encoded) # TODO: should be QOI_FREE
 
     def __dealloc__(self):
         PyMem_RawFree(self.nodes)
