@@ -86,13 +86,7 @@ jobs:
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-    - name: Publish distribution 📦 to Test PyPI
-      uses: pypa/gh-action-pypi-publish@master
-      continue-on-error: true
-      with:
-        password: ${{ secrets.testpypi_password }}
-        repository_url: https://test.pypi.org/legacy/
+
     - name: Publish distribution 📦 to PyPI
       if: startsWith(github.event.ref, 'refs/tags')
       uses: pypa/gh-action-pypi-publish@master
