@@ -29,6 +29,7 @@ cdef extern from *:
     #define STB_RECT_PACK_IMPLEMENTATION
     #define STB_IMAGE_IMPLEMENTATION
     #define QOI_IMPLEMENTATION
+    #define QOI_NO_STDIO
     #ifndef _OPENMP
         #define omp_get_max_threads() 1
     #endif
