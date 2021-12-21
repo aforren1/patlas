@@ -1,4 +1,7 @@
-A simple, dependency-free texture atlas packer.
+[![image](https://img.shields.io/pypi/v/patlas.svg)](https://pypi.python.org/pypi/patlas)
+[![Build](https://github.com/aforren1/patlas/workflows/Build/badge.svg?branch=main)](https://github.com/aforren1/patlas/actions/workflows/build.yml)
+
+A simple, runtime-dependency-free texture atlas packer.
 
 Basic usage:
 
@@ -22,7 +25,7 @@ See [demo.py](https://github.com/aforren1/patlas/blob/main/demo.py) for example 
 
 Features/limitations:
 
- - Uses `stb_image` and `stb_rect_pack` from [stb](https://github.com/nothings/stb) under the hood
+ - Uses `stb_image` and `stb_rect_pack` from [stb](https://github.com/nothings/stb)
    - Can import any image format `stb_image` can (see [here](https://github.com/nothings/stb/blob/5ba0baaa269b3fd681828e0e3b3ac0f1472eaf40/stb_image.h#L23))
  - Only square RGBA textures (currently)
  - Optional OpenMP support (disabled by default to reduce wheel size) can substantially reduce runtime. To enable, build from source with `OMP=1` set in the environment, e.g. `OMP=1 pip install patlas --no-binary patlas`
@@ -31,6 +34,6 @@ Features/limitations:
    - Linux may need extra packages, e.g. `libomp-dev` on Ubuntu
  - Save to a custom `.patlas` file
    - Uses [qoi](https://qoiformat.org/) image format + zlib for fast and small encoding/decoding
-   - See the [save](https://github.com/aforren1/patlas/blob/59675ab2e7e56639b827396377fee7719dae74ff/patlas.pyx#L220) method for gory details
+   - See the [save](https://github.com/aforren1/patlas/blob/main/patlas.pyx) method of `AtlasPacker` for gory details
  - Includes a command-line utility (see `patlas --help` for details)
  - Requires Cython at build time (but source distribution should have pre-generated `.c` files)

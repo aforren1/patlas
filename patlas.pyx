@@ -32,9 +32,6 @@ cdef extern from *:
     #ifndef _OPENMP
         #define omp_get_max_threads() 1
     #endif
-    //#define STBI_MALLOC PyMem_RawMalloc
-    //#define STBI_FREE PyMem_RawFree
-    //#define STBI_REALLOC PyMem_RawRealloc
     """
 
 cdef extern from 'stb/stb_image.h' nogil:
@@ -97,6 +94,7 @@ cdef class AtlasPacker:
     # 
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
+    cdef array _cyatlas
 
     def __init__(self, side: int, pad: int=2, heuristic: Heuristic=Heuristic.DEFAULT):
         self.width = side
@@ -113,6 +111,8 @@ cdef class AtlasPacker:
         stbrp_init_target(&self.context, self.width, self.height, self.nodes, self.num_nodes)
         stbrp_setup_heuristic(&self.context, self.heuristic)
         self._atlas = <unsigned char*> PyMem_RawCalloc(self.width * self.height * 4, sizeof(char))
+        self._cyatlas = array((self.width, self.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
+        self._cyatlas.data = <char*> self._atlas
         stbi_set_flip_vertically_on_load(1) # set bottom-left as start
 
 
@@ -190,13 +190,9 @@ cdef class AtlasPacker:
             free(xys)
             PyMem_RawFree(im_names)
 
-
     @property
     def atlas(self):
-        cdef array _atlas = array((self.width, self.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
-        _atlas.data = <char*> self._atlas
-        # we manage the memory internally, so no need to set free callback?
-        return _atlas.memview
+        return self._cyatlas.memview
 
     def save(self, name: str):
         # TODO: option to use .png instead? Slower but smaller
