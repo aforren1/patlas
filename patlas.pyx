@@ -119,7 +119,6 @@ cdef class AtlasPacker:
     cpdef pack(self, images: list[str]):
         # take list of image paths
         # return nothing for now (or just warning/err)-- on request, give memoryview & dict
-        # TODO: release GIL
         cdef stbrp_rect* rects
         cdef int x, y, yy, channels_in_file, size, _id, i
         cdef int n_images = len(images)
@@ -151,7 +150,6 @@ cdef class AtlasPacker:
             # step 3: read in images and stick in memoryview, accounting for padding 
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
-            # TODO: prange outer or inner loop (or both??)?
             with nogil, parallel():
                 thread_id = threadid()
                 for i in prange(n_images, schedule='guided'):
@@ -182,7 +180,7 @@ cdef class AtlasPacker:
                                                                            'w': rects[_id].w - 2*self.pad,
                                                                            'h': rects[_id].h - 2*self.pad}
 
-        # all done (and/or failed), free rects
+        # all done (and/or failed), free
         finally:
             free(rects)
             free(xs)

@@ -31,6 +31,6 @@ Features/limitations:
    - Linux may need extra packages, e.g. `libomp-dev` on Ubuntu
  - Save to a custom `.patlas` file
    - Uses [qoi](https://qoiformat.org/) image format + zlib for fast and small encoding/decoding
-   - See the [save](https://github.com/aforren1/patlas/blob/main/patlas.pyx#L224) method for gory details
+   - See the [save](https://github.com/aforren1/patlas/blob/59675ab2e7e56639b827396377fee7719dae74ff/patlas.pyx#L220) method for gory details
  - Includes a command-line utility (see `patlas --help` for details)
  - Requires Cython at build time (but source distribution should have pre-generated `.c` files)
