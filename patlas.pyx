@@ -120,7 +120,7 @@ cdef class AtlasPacker:
         # take list of image paths
         # return nothing (or just warning/err)
         cdef stbrp_rect* rects
-        cdef int x, y, yy, channels_in_file, size, _id, i, w, h
+        cdef int x, y, yy, channels_in_file, size, i, w, h
         cdef int n_images = len(images)
         cdef int max_threads = openmp.omp_get_max_threads()
         cdef int* xys # interleaved x,y (so e.g. xy[0] is x and xy[1] is y)
@@ -137,7 +137,7 @@ cdef class AtlasPacker:
             for i in range(n_images):
                 if not stbi_info(im_names[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
-                rects[i].id = i
+                rects[i].id = i # unused
                 rects[i].w = x + 2 * self.pad
                 rects[i].h = y + 2 * self.pad
 
@@ -152,8 +152,7 @@ cdef class AtlasPacker:
                 thread_id = threadid()
                 thread_idx = thread_id * 2
                 for i in prange(n_images, schedule='guided'):
-                    _id = rects[i].id
-                    data = stbi_load(im_names[_id], &xys[thread_idx], &xys[thread_idx+1], &channels_in_file, 4) # force RGBA
+                    data = stbi_load(im_names[i], &xys[thread_idx], &xys[thread_idx+1], &channels_in_file, 4) # force RGBA
                     if data is NULL:
                         with gil:
                             raise RuntimeError('Memory failed to load. %s' % stbi_failure_reason())
@@ -165,24 +164,23 @@ cdef class AtlasPacker:
                         # get the subset of the atlas we're writing this row to-- need to account for padding
                         # and global offset within atlas
                         # TODO: this doesn't work for non-square target images, but I can't reason through why?
-                        target_row = &self._atlas[(rects[_id].y + yy + self.pad) * self.width * 4 + (rects[_id].x + self.pad) * 4]
+                        target_row = &self._atlas[(rects[i].y + yy + self.pad) * self.width * 4 + (rects[i].x + self.pad) * 4]
                         memcpy(target_row, source_row, xys[thread_idx] * 4 * sizeof(char))
                     
                     free(data) # done with the image now (TODO: should use STBI_FREE)
                 
             # step 4: build up dict with keys
             for i in range(n_images):
-                _id = rects[i].id
-                x = rects[_id].x + self.pad
-                y = rects[_id].y + self.pad
-                w = rects[_id].w - 2*self.pad
-                h = rects[_id].h - 2*self.pad
+                x = rects[i].x + self.pad
+                y = rects[i].y + self.pad
+                w = rects[i].w - 2*self.pad
+                h = rects[i].h - 2*self.pad
                 # TODO: store as array [u0 v0 u1 v1] or like this?
                 # This is more descriptive, but more typing on the user side
-                self.metadata[op.splitext(op.basename(images[_id]))[0]] = {'u0': x / <double>self.width,
-                                                                           'v0': y / <double>self.height,
-                                                                           'u1': (x + w) / <double>self.width,
-                                                                           'v1': (y + h) / <double>self.height}
+                self.metadata[op.splitext(op.basename(images[i]))[0]] = {'u0': x / <double>self.width,
+                                                                         'v0': y / <double>self.height,
+                                                                         'u1': (x + w) / <double>self.width,
+                                                                         'v1': (y + h) / <double>self.height}
 
         # all done (and/or failed), free
         finally:
