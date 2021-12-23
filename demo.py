@@ -1,7 +1,7 @@
 import moderngl as mgl
 import glfw
 import numpy as np
-from patlas import AtlasPacker
+from patlas import AtlasPacker, TextureFormat
 
 image_vert = """
 #version 330
@@ -48,12 +48,13 @@ if __name__ == '__main__':
 
     prog = ctx.program(vertex_shader=image_vert, fragment_shader=image_frag)
 
-    ap = AtlasPacker(2048, pad=1)
+    ap = AtlasPacker(2048, pad=1, texture_format=TextureFormat.DXT5)
 
     ap.pack(['images/alex.png', 'images/kazoo.jpg'])
 
     atlas = ap.atlas
-    tex = ctx.texture(atlas.shape[0:2], atlas.shape[2], atlas)
+    print(ap.metadata)
+    tex = ctx.texture(atlas.shape[0:2], atlas.shape[2], atlas, internal_format=0x83F3)
 
     vbo = np.empty(4, dtype=[('vertices', np.float32, 2), ('texcoord', np.float32, 2)])
     vbo['vertices'] = [(-1, -1), (-1, -0.25), (-0.25, -1), (-0.25, -0.25)]
@@ -61,11 +62,11 @@ if __name__ == '__main__':
     buf = ctx.buffer(vbo)
     vao = ctx.vertex_array(prog, buf, 'vertices', 'texcoord')
 
-    a = ap.metadata['alex']
+    a = ap.metadata['images']['alex']
     atex = np.array([(a['u0'], a['v0']), (a['u0'], a['v1']),
                      (a['u1'], a['v0']), (a['u1'], a['v1'])],
                      dtype='f4')
-    k = ap.metadata['kazoo']
+    k = ap.metadata['images']['kazoo']
     ktex = np.array([(k['u0'], k['v0']), (k['u0'], k['v1']),
                      (k['u1'], k['v0']), (k['u1'], k['v1'])],
                      dtype='f4')

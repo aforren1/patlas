@@ -100,6 +100,7 @@ cdef class AtlasPacker:
     cdef int heuristic
     cdef readonly dict metadata
     cdef readonly TextureFormat texture_format 
+    cdef int _dirty
     # 
     cdef stbrp_node* nodes
     cdef unsigned char* _atlas
@@ -121,6 +122,7 @@ cdef class AtlasPacker:
         self.heuristic = heuristic
         self.texture_format = texture_format
         self.metadata = {'texture_format': texture_format, 'images': {}}
+        self._dirty = 0
 
         self.nodes = <stbrp_node*> PyMem_RawMalloc(self.num_nodes * sizeof(stbrp_node))
         # we only call init once, so that we can re-use with another call to pack
@@ -205,7 +207,7 @@ cdef class AtlasPacker:
                                                                                    'v0': y / <double>self.height,
                                                                                    'u1': (x + w) / <double>self.width,
                                                                                    'v1': (y + h) / <double>self.height}
-
+            self._dirty = 1
         # all done (and/or failed), free
         finally:
             free(rects)
@@ -218,10 +220,54 @@ cdef class AtlasPacker:
             return self._cyatlas.memview
         elif self.texture_format == TextureFormat.DXT5:
             # we can't compress during atlas packing, because we don't know what adjacent pixels will be
-            return self.compress_dxt5()
+            if self._dirty:
+                self.compress_dxt5()
+                self._dirty = 0
+            
+            return self._cydxt5.memview
     
-    cdef compress_dxt5(self):
-        pass
+    cdef void compress_dxt5(self) nogil:
+        # see e.g. stbgl__compress https://github.com/nothings/stb/blob/c9064e317699d2e495f36ba4f9ac037e88ee371a/tests/caveview/stb_gl.h#L527
+        cdef int i, j, y, y2, x
+        #cdef unsigned char block[16*4]
+        cdef unsigned char* block
+        cdef int thread_id, thread_idx
+        cdef int max_threads = openmp.omp_get_max_threads()
+
+        block = <unsigned char*> malloc(16*4*max_threads)
+        with parallel():
+            thread_id = threadid()
+            thread_idx = thread_id * 64
+            for j in prange(0, self.width, 4, schedule='static'):
+                x = 4
+                for i in range(0, self.height, 4):
+                    if (i + 3) >= self.width:
+                        x = self.width - i
+                    for y in range(4):
+                        if (j + y >= self.height): break
+                        memcpy(&block[thread_idx] + y*16, self._atlas + self.width*4*(j+y) + i*4, x*4)
+                    if (x < 4):
+                        if (x == 1):
+                            for y2 in range(y):
+                                memcpy(&block[thread_idx] + y2*16 + 4, &block[thread_idx] + y2*16, 4)
+                                memcpy(&block[thread_idx] + y2*16 + 8, &block[thread_idx] + y2*16, 8)
+                        elif (x == 2):
+                            for y2 in range(y):
+                                memcpy(&block[thread_idx] + y2*16 + 8, &block[thread_idx] + y2*16, 8)
+                        elif (x == 3):
+                            for y2 in range(y):
+                                memcpy(&block[thread_idx] + y2*16 + 12, &block[thread_idx] + y2*16 + 4, 4)
+                        else:
+                            with gil:
+                                raise RuntimeError('Something went wrong during compression.')
+
+                    y2 = 0
+                    for y in range(y, 4):
+                        memcpy(&block[thread_idx] + y*16, &block[thread_idx] + y2*16, 16)
+                        y2 = y2 + 1
+                    
+                    stb_compress_dxt_block(&self._dxt5[(j * self.width) + i*4], &block[thread_idx], 1, 10)
+        free(block)
 
     def save(self, name: str):
         # TODO: option to use .png instead? Slower but smaller

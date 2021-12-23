@@ -1,5 +1,5 @@
 from contextlib import ContextDecorator
-from patlas import AtlasPacker, load
+from patlas import AtlasPacker, load, TextureFormat
 from timeit import default_timer
 import pathlib
 
@@ -43,7 +43,19 @@ with timer('Load'):
 
 assert bytes(loaded_atlas) == bytes(x.atlas)
 
-if False:
+# DXT5
+w = AtlasPacker(dim, pad=1, texture_format=TextureFormat.DXT5)
+with timer('DXT5'):
+    w.pack(ims*N)
+
+with timer('DXT5 retrieval'):
+    tmp = w.atlas
+
+with timer('DXT5 retrieval (cached)'):
+    tmp = w.atlas
+
+
+if True:
     import matplotlib.pyplot as plt
     from PIL import Image
     import numpy as np
@@ -51,6 +63,9 @@ if False:
     plt.show()
 
     plt.imshow(z.atlas, origin='lower')
+    plt.show()
+
+    plt.imshow(w.atlas, origin='lower')
     plt.show()
 
     im = Image.fromarray(np.array(x.atlas))
