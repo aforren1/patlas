@@ -1,6 +1,0 @@
-[submodule "stb"]
-	path = stb
-	url = https://github.com/nothings/stb
-[submodule "qoi"]
-	path = qoi
-	url = https://github.com/phoboslab/qoi

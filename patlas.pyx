@@ -36,13 +36,13 @@ cdef extern from *:
     #endif
     """
 
-cdef extern from 'stb/stb_image.h' nogil:
+cdef extern from 'deps/stb_image.h' nogil:
     int stbi_info(const char* filename, int *x, int *y, int *comp)
     unsigned char* stbi_load(const char* filename, int *x, int *y, int *channels_in_file, int desired_channels)
     void stbi_set_flip_vertically_on_load(int flag_true_if_should_flip)
     const char* stbi_failure_reason()
 
-cdef extern from 'stb/stb_rect_pack.h' nogil:
+cdef extern from 'deps/stb_rect_pack.h' nogil:
     struct stbrp_context:
         pass
 
@@ -59,10 +59,10 @@ cdef extern from 'stb/stb_rect_pack.h' nogil:
     void stbrp_init_target(stbrp_context *context, int width, int height, stbrp_node *nodes, int num_nodes)
     void stbrp_setup_heuristic(stbrp_context *context, int heuristic)
 
-cdef extern from 'stb/stb_dxt.h' nogil:
+cdef extern from 'deps/stb_dxt.h' nogil:
     void stb_compress_dxt_block(unsigned char* dest, const unsigned char* src_rgba_four_bytes_per_pixel, int alpha, int mode)
 
-cdef extern from 'qoi/qoi.h' nogil:
+cdef extern from 'deps/qoi.h' nogil:
     ctypedef struct qoi_desc:
         unsigned int width
         unsigned int height
@@ -121,7 +121,8 @@ cdef class AtlasPacker:
         self.num_nodes = 2 * side
         self.heuristic = heuristic
         self.texture_format = texture_format
-        self.metadata = {'texture_format': texture_format, 'images': {}}
+        self.metadata = {'texture_format': texture_format, 'images': {},
+                         'width': self.width, 'height': self.height}
         self._dirty = 0
 
         self.nodes = <stbrp_node*> PyMem_RawMalloc(self.num_nodes * sizeof(stbrp_node))
@@ -148,9 +149,8 @@ cdef class AtlasPacker:
         cdef stbrp_rect* rects
         cdef int x, y, yy, channels_in_file, size, i, w, h
         cdef int n_images = len(images)
-        cdef int max_threads = openmp.omp_get_max_threads()
         cdef int* xys # interleaved x,y (so e.g. xy[0] is x and xy[1] is y)
-        cdef int thread_id, thread_idx # local ID & index
+        cdef int thread_idx # local index
 
         # step 1: read image attributes
         cdef const char **im_names = to_cstring_array(images)
@@ -159,7 +159,7 @@ cdef class AtlasPacker:
         cdef unsigned char* target_row
         try:
             rects = <stbrp_rect*> malloc(n_images * sizeof(stbrp_rect))
-            xys = <int*> malloc(max_threads * 2 * sizeof(int))
+            xys = <int*> malloc(openmp.omp_get_max_threads() * 2 * sizeof(int))
             for i in range(n_images):
                 if not stbi_info(im_names[i], &x, &y, &channels_in_file):
                     raise RuntimeError('Image property query failed. %s' % stbi_failure_reason())
@@ -175,8 +175,7 @@ cdef class AtlasPacker:
             # see https://stackoverflow.com/q/12273047/2690232
             # for padding ideas
             with nogil, parallel():
-                thread_id = threadid()
-                thread_idx = thread_id * 2
+                thread_idx = threadid() * 2
                 for i in prange(n_images, schedule='guided'):
                     data = stbi_load(im_names[i], &xys[thread_idx], &xys[thread_idx+1], &channels_in_file, 4) # force RGBA
                     if data is NULL:
@@ -221,7 +220,8 @@ cdef class AtlasPacker:
         elif self.texture_format == TextureFormat.DXT5:
             # we can't compress during atlas packing, because we don't know what adjacent pixels will be
             if self._dirty:
-                self.compress_dxt5()
+                with nogil:
+                    self.compress_dxt5()
                 self._dirty = 0
             
             return self._cydxt5.memview
@@ -229,15 +229,10 @@ cdef class AtlasPacker:
     cdef void compress_dxt5(self) nogil:
         # see e.g. stbgl__compress https://github.com/nothings/stb/blob/c9064e317699d2e495f36ba4f9ac037e88ee371a/tests/caveview/stb_gl.h#L527
         cdef int i, j, y, y2, x
-        #cdef unsigned char block[16*4]
         cdef unsigned char* block
-        cdef int thread_id, thread_idx
-        cdef int max_threads = openmp.omp_get_max_threads()
 
-        block = <unsigned char*> malloc(16*4*max_threads)
         with parallel():
-            thread_id = threadid()
-            thread_idx = thread_id * 64
+            block = <unsigned char*> malloc(16*4)
             for j in prange(0, self.width, 4, schedule='static'):
                 x = 4
                 for i in range(0, self.height, 4):
@@ -245,29 +240,29 @@ cdef class AtlasPacker:
                         x = self.width - i
                     for y in range(4):
                         if (j + y >= self.height): break
-                        memcpy(&block[thread_idx] + y*16, self._atlas + self.width*4*(j+y) + i*4, x*4)
+                        memcpy(&block[y*16], &self._atlas[self.width*4*(j+y) + i*4], x*4)
                     if (x < 4):
                         if (x == 1):
                             for y2 in range(y):
-                                memcpy(&block[thread_idx] + y2*16 + 4, &block[thread_idx] + y2*16, 4)
-                                memcpy(&block[thread_idx] + y2*16 + 8, &block[thread_idx] + y2*16, 8)
+                                memcpy(&block[y2*16 + 4], &block[y2*16], 4)
+                                memcpy(&block[y2*16 + 8], &block[y2*16], 8)
                         elif (x == 2):
                             for y2 in range(y):
-                                memcpy(&block[thread_idx] + y2*16 + 8, &block[thread_idx] + y2*16, 8)
+                                memcpy(&block[y2*16 + 8], &block[y2*16], 8)
                         elif (x == 3):
                             for y2 in range(y):
-                                memcpy(&block[thread_idx] + y2*16 + 12, &block[thread_idx] + y2*16 + 4, 4)
+                                memcpy(&block[y2*16 + 12], &block[y2*16 + 4], 4)
                         else:
                             with gil:
                                 raise RuntimeError('Something went wrong during compression.')
 
                     y2 = 0
                     for y in range(y, 4):
-                        memcpy(&block[thread_idx] + y*16, &block[thread_idx] + y2*16, 16)
+                        memcpy(&block[y*16], &block[y2*16], 16)
                         y2 = y2 + 1
                     
-                    stb_compress_dxt_block(&self._dxt5[(j * self.width) + i*4], &block[thread_idx], 1, 10)
-        free(block)
+                    stb_compress_dxt_block(&self._dxt5[(j * self.width) + i*4], block, 1, 10)
+            free(block)
 
     def save(self, name: str):
         # TODO: option to use .png instead? Slower but smaller
@@ -283,9 +278,13 @@ cdef class AtlasPacker:
         desc.channels = 4
         desc.colorspace = 0 # unused
 
-        encoded = qoi_encode(self._atlas, &desc, &size)
-        if encoded is NULL:
-            raise RuntimeError('Failed to encode atlas.')
+        if self.metadata['texture_format'] == TextureFormat.RGBA8:
+            encoded = qoi_encode(self._atlas, &desc, &size)
+            if encoded is NULL:
+                raise RuntimeError('Failed to encode atlas.')
+        else:
+            encoded = <void*> self._dxt5
+            size = desc.width * desc.height
         
         try:
             temp = array((size,), itemsize=sizeof(char), format='b', allocate_buffer=False)
@@ -293,7 +292,8 @@ cdef class AtlasPacker:
             with open(f'{name}.patlas', 'wb') as f:
                 pkl.dump((zlib.compress(memoryview(temp), 1), self.metadata), f, 4) # TODO: pkl.DEFAULT_PROTOCOL?
         finally:
-            free(encoded) # TODO: should be QOI_FREE
+            if self.metadata['texture_format'] == TextureFormat.RGBA8:
+                free(encoded) # TODO: should be QOI_FREE
 
     def __dealloc__(self):
         PyMem_RawFree(self.nodes)
@@ -312,11 +312,22 @@ cpdef load(filename: str):
     cdef const unsigned char[:] mview = zlib.decompress(raw_atlas)
     cdef int len_data = mview.shape[0]
     cdef qoi_desc desc
-    cdef void* temp = qoi_decode(<const void*> &mview[0], len_data, &desc, 4)
-    if temp is NULL:
-        raise RuntimeError('Unable to load .qoi image from .patlas file.')
-    
-    cdef array _atlas = array((desc.width, desc.height, 4), mode='c', itemsize=sizeof(char), format='B', allocate_buffer=False)
-    _atlas.data = <char *> temp
-    _atlas.callback_free_data = free
+    cdef void* temp
+    cdef array _atlas
+
+    if metadata['texture_format'] == TextureFormat.RGBA8:
+        temp = qoi_decode(<const void*> &mview[0], len_data, &desc, 4)
+        if temp is NULL:
+            raise RuntimeError('Unable to load .qoi image from .patlas file.')
+        _atlas = array((desc.width, desc.height, 4), mode='c',
+                       itemsize=sizeof(char), format='B', allocate_buffer=False)
+        _atlas.data = <char *> temp
+        _atlas.callback_free_data = free
+    else:
+        desc.width = metadata['width']
+        desc.height = metadata['height']
+        _atlas = array((desc.width, desc.height, 1), mode='c',
+                       itemsize=sizeof(char), format='B', allocate_buffer=True)
+        memcpy(_atlas.data, &mview[0], desc.width * desc.height)
+
     return _atlas, metadata

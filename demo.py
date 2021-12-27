@@ -18,12 +18,12 @@ void main()
 
 image_frag = """
 #version 330
-uniform sampler2D texture;
+uniform sampler2D tex;
 in vec2 v_texcoord;
 out vec4 f_color;
 void main()
 {
-    f_color = texture2D(texture, v_texcoord);
+    f_color = texture(tex, v_texcoord);
 }
 """
 
@@ -48,13 +48,14 @@ if __name__ == '__main__':
 
     prog = ctx.program(vertex_shader=image_vert, fragment_shader=image_frag)
 
-    ap = AtlasPacker(2048, pad=1, texture_format=TextureFormat.DXT5)
+    ap = AtlasPacker(2048, pad=1)#, texture_format=TextureFormat.DXT5)
 
     ap.pack(['images/alex.png', 'images/kazoo.jpg'])
 
     atlas = ap.atlas
     print(ap.metadata)
-    tex = ctx.texture(atlas.shape[0:2], atlas.shape[2], atlas, internal_format=0x83F3)
+    tex = ctx.texture(atlas.shape[0:2], atlas.shape[2], atlas, 
+                      internal_format=ap.metadata['texture_format'])
 
     vbo = np.empty(4, dtype=[('vertices', np.float32, 2), ('texcoord', np.float32, 2)])
     vbo['vertices'] = [(-1, -1), (-1, -0.25), (-0.25, -1), (-0.25, -0.25)]

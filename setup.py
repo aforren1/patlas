@@ -30,7 +30,7 @@ with open('README.md', 'r') as f:
 
 setuptools.setup(
     name='patlas',
-    version='0.0.5',
+    version='0.0.6',
     author='Alex Forrence',
     author_email='alex.forrence@gmail.com',
     description='Simple texture atlas packer',

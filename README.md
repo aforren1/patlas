@@ -14,7 +14,7 @@ ap.pack(glob('images/*.png')) # list of images
 ap.pack(['images/image.jpg']) # can call multiple times (packing quality may suffer)
 
 ap.atlas # memoryview of RGBA texture
-ap.metadata # dictionary of image locations
+ap.metadata # dictionary of image locations and image format
 
 ap.save('atlas') # serialize as custom .patlas file
 
@@ -25,9 +25,10 @@ See [demo.py](https://github.com/aforren1/patlas/blob/main/demo.py) for example 
 
 Features/limitations:
 
- - Uses `stb_image` and `stb_rect_pack` from [stb](https://github.com/nothings/stb)
+ - Uses `stb_image`, `stb_rect_pack`, and `stb_dxt` from [stb](https://github.com/nothings/stb)
    - Can import any image format `stb_image` can (see [here](https://github.com/nothings/stb/blob/5ba0baaa269b3fd681828e0e3b3ac0f1472eaf40/stb_image.h#L23))
  - Only square RGBA textures (currently)
+ - Optional DXT5/BC3(?) compression
  - Optional OpenMP support (disabled by default to reduce wheel size) can substantially reduce runtime. To enable, build from source with `OMP=1` set in the environment, e.g. `OMP=1 pip install patlas --no-binary patlas`
    - On Windows, should "just work"?
    - MacOS may need extra packages, e.g. `libomp` from brew
