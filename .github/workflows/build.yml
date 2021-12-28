@@ -4,13 +4,20 @@ on: [push]
 
 env:
   CIBW_SKIP: pp* *-manylinux_i686 *-musllinux_*
-  CIBW_BEFORE_BUILD: git submodule update --init --recursive
-  CIBW_BEFORE_BUILD_MACOS: $CIBW_BEFORE_BUILD && brew install libomp
+  CIBW_BEFORE_BUILD_MACOS: brew install libomp # necessary for wheel building, even when not enabled?
   CIBW_TEST_COMMAND: python {project}/test.py
   CIBW_ARCHS_LINUX: auto aarch64
   # CIBW_ENVIRONMENT: OMP=1
 
 jobs:
+  cancel_previous:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Cancel Previous Runs
+          uses: styfle/cancel-workflow-action@0.9.1
+          with:
+            access_token: ${{ github.token }}
+
   build_wheels:
     name: Build wheel on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -59,7 +66,6 @@ jobs:
     
     - name: Build source
       run: |
-        git submodule update --init --recursive
         python -m pip install setuptools wheel Cython>=3.0a9
         python setup.py sdist --formats=zip
     - uses: actions/upload-artifact@v2

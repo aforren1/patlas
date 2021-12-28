@@ -1,5 +1,5 @@
 from contextlib import ContextDecorator
-from patlas import AtlasPacker, load
+from patlas import AtlasPacker, load, TextureFormat
 from timeit import default_timer
 import pathlib
 
@@ -20,7 +20,7 @@ class timer(ContextDecorator):
         return self
     def __exit__(self, *exc):
         t1 = default_timer() - self.t0
-        print(f'{self.sv} took {t1} seconds.')
+        print(f'{self.sv} took {t1:.3f} seconds.')
 
 pth = pathlib.Path(pth).parent.resolve()
 ims = [str(pth / 'images' / x) for x in ['alex.png', 'kazoo.jpg']]
@@ -38,10 +38,33 @@ with timer('Single'):
 with timer('Pickle'):
     x.save(str(pth / 'foo'))
 
+print(f'Pickle size: {(pth / "foo.patlas").stat().st_size * 1e-6:.3f} MB')
+
 with timer('Load'):
     loaded_atlas, loaded_locs = load(str(pth / 'foo.patlas'))
 
 assert bytes(loaded_atlas) == bytes(x.atlas)
+
+# DXT5
+w = AtlasPacker(dim, pad=1, texture_format=TextureFormat.DXT5)
+with timer('DXT5'):
+    w.pack(ims*N)
+
+with timer('DXT5 retrieval'):
+    tmp = w.atlas
+
+with timer('DXT5 retrieval (cached)'):
+    tmp = w.atlas
+
+with timer('DXT5 pickle'):
+    w.save(str(pth / 'foo'))
+
+print(f'DXT5 pickle size: {(pth / "foo.patlas").stat().st_size * 1e-6:.3f} MB')
+
+with timer('DXT5 pickle load'):
+    dxt_atlas, dxt_meta = load(str(pth / 'foo.patlas'))
+
+assert bytes(dxt_atlas) == bytes(w.atlas)
 
 if False:
     import matplotlib.pyplot as plt
@@ -53,8 +76,12 @@ if False:
     plt.imshow(z.atlas, origin='lower')
     plt.show()
 
+    plt.imshow(w.atlas, origin='lower')
+    plt.show()
+
+if False:
     im = Image.fromarray(np.array(x.atlas))
-    
+
     with timer('PIL save PNG'):
         im.save('test.png')
 
