@@ -68,8 +68,6 @@ assert bytes(dxt_atlas) == bytes(w.atlas)
 
 if False:
     import matplotlib.pyplot as plt
-    from PIL import Image
-    import numpy as np
     plt.imshow(x.atlas, origin='lower')
     plt.show()
 
@@ -80,6 +78,9 @@ if False:
     plt.show()
 
 if False:
+    from PIL import Image
+    import numpy as np
+    
     im = Image.fromarray(np.array(x.atlas))
 
     with timer('PIL save PNG'):
